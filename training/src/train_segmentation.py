@@ -24,6 +24,7 @@ from datetime import datetime
 
 #from dataset import get_train_dataset_pipeline, get_valid_dataset_pipeline
 from resnet18_seg import resnet_18_seg
+from mobilenet_seg import mobilenetv1_seg
 from dataset_prepare import CocoPose
 from dataset_augment import set_network_input_wh, set_network_scale
 import math
@@ -37,15 +38,20 @@ norm_scale = 0.176
 
 is_rgb = False
 
-def get_loss_and_output( batchsize, input_image, input_label, reuse_variables=None):
+def get_loss_and_output(model_name, batchsize, input_image, input_label, reuse_variables=None):
     losses = []
 
     with tf.variable_scope(tf.get_variable_scope(), reuse=reuse_variables):
-        prediction = resnet_18_seg(input_image, is_training=True)
+       if model_name == 'resnet18':
+          prediction, net_scope = resnet_18_seg(input_image, is_training=True)
+       if model_name == 'mobilenetv1':
+          prediction, net_scope = mobilenetv1_seg(input_image, is_training=True)
+       else:
+          raise ValueError('Unsupported model!', model_name)
  
     loss = tf.nn.l2_loss(prediction - input_label, name='loss')
     total_loss = tf.reduce_sum(loss) / batchsize
-    return total_loss, prediction
+    return total_loss, prediction, net_scope
 
 
 def average_gradients(tower_grads):
@@ -299,11 +305,11 @@ def main(argv=None):
         tower_grads = []
         reuse_variable = False
 
-        loss, pred_heat = get_loss_and_output( params['batchsize'], input_image, input_heat, reuse_variable)
+        loss, pred_heat, net_scope = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, reuse_variable)
         reuse_variable = True
         grads = opt.compute_gradients(loss)
         tower_grads.append(grads)
-        valid_loss, valid_pred_heat = get_loss_and_output(params['batchsize'], input_image, input_heat, reuse_variable)
+        valid_loss, valid_pred_heat, _ = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, reuse_variable)
  
         grads = average_gradients(tower_grads)
         for grad, var in grads:
@@ -320,7 +326,7 @@ def main(argv=None):
         variables_averages_op = variable_averages.apply(variable_to_average)
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        init_variables_backbone = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'resnet_v2')
+        init_variables_backbone = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, net_scope)
         with tf.control_dependencies(update_ops):
             train_op = tf.group(apply_gradient_op, variables_averages_op)
             #train_op = tf.group(apply_gradient_op)
