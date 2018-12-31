@@ -20,6 +20,7 @@ import numpy as np
 import configparser
 #import dataset
 
+import tensorflow.contrib.slim as slim
 from datetime import datetime
 
 #from dataset import get_train_dataset_pipeline, get_valid_dataset_pipeline
@@ -38,19 +39,23 @@ norm_scale = 0.176
 
 is_rgb = False
 
-def get_loss_and_output(model_name, batchsize, input_image, input_label, reuse_variables=None):
+def get_loss_and_output(model_name, batchsize, input_image, input_label, depth_multiplier=1.0, reuse_variables=None):
     losses = []
 
     with tf.variable_scope(tf.get_variable_scope(), reuse=reuse_variables):
        if model_name == 'resnet18':
           prediction, net_scope = resnet_18_seg(input_image, is_training=True)
        if model_name == 'mobilenetv1':
-          prediction, net_scope = mobilenetv1_seg(input_image, is_training=True)
+          prediction, net_scope = mobilenetv1_seg(input_image, depth_multiplier, is_training=True)
        else:
           raise ValueError('Unsupported model!', model_name)
  
     loss = tf.nn.l2_loss(prediction - input_label, name='loss')
     total_loss = tf.reduce_sum(loss) / batchsize
+	#input_label = tf.cast(input_label, tf.uint8)
+    #loss = tf.losses.sigmoid_cross_entropy(input_label, prediction)
+    #regularization_loss = tf.add_n(slim.losses.get_regularization_losses())
+    #total_loss = tf.reduce_sum(loss) + regularization_loss
     return total_loss, prediction, net_scope
 
 
@@ -163,9 +168,9 @@ def random_crop(image, mask):
 
 	
 
-input_height = 192
-input_width = 192
-scale = 2
+input_height = 112
+input_width = 112
+scale = 1
 
 
 def decode_record(filename_queue):
@@ -184,7 +189,7 @@ def decode_record(filename_queue):
 		image = tf.reshape(image, [height, width, 3])
 		mask = tf.reshape(mask, [height, width, 1])
 
-		image, mask = random_crop(image, mask)
+		#image, mask = random_crop(image, mask)
 
 		
 		#print(image.get_shape())
@@ -207,6 +212,7 @@ def decode_record(filename_queue):
 
 		boolean_mask = tf.greater(mask, 0.5)
 		mask = tf.multiply(mask, tf.cast(boolean_mask, mask.dtype))		
+		#mask = tf.cast(boolean_mask, tf.uint)
 
 		image = (image - [[[b_mean, g_mean, r_mean]]]) * norm_scale
 		return image, mask
@@ -302,14 +308,23 @@ def main(argv=None):
         opt = tf.train.AdamOptimizer(learning_rate, epsilon=1e-8)
         
         #opt = tf.train.MomentumOptimizer(learning_rate, momentum=0.9)
+        #opt = tf.train.GradientDescentOptimizer(0.5)
+        
         tower_grads = []
         reuse_variable = False
 
-        loss, pred_heat, net_scope = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, reuse_variable)
+        loss, pred_heat, net_scope = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, params['depth_multiplier'], reuse_variable)
         reuse_variable = True
         grads = opt.compute_gradients(loss)
         tower_grads.append(grads)
-        valid_loss, valid_pred_heat, _ = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, reuse_variable)
+        valid_loss, valid_pred_heat, _ = get_loss_and_output(params['model'], params['batchsize'], input_image, input_heat, params['depth_multiplier'], reuse_variable)
+
+        #quantize
+        if params['quantize']:
+             tf.contrib.quantize.create_training_graph(quant_delay=params['quantize_delay'])
+
+
+
  
         grads = average_gradients(tower_grads)
         for grad, var in grads:
@@ -326,13 +341,12 @@ def main(argv=None):
         variables_averages_op = variable_averages.apply(variable_to_average)
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        init_variables_backbone = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, net_scope)
+        init_variables_backbone = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, net_scope)
         with tf.control_dependencies(update_ops):
             train_op = tf.group(apply_gradient_op, variables_averages_op)
             #train_op = tf.group(apply_gradient_op)
 
-        #saver = tf.train.Saver(init_variables_backbone)
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(init_variables_backbone)
 
         tf.summary.scalar("learning_rate", learning_rate)
         tf.summary.scalar("loss", loss)
@@ -352,6 +366,9 @@ def main(argv=None):
 
         init = tf.global_variables_initializer()
         config = tf.ConfigProto()
+
+        saver_all_variables = tf.train.Saver()
+
         # occupy gpu gracefully
         config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
@@ -361,8 +378,8 @@ def main(argv=None):
                 checkpoint_saver.restore(sess, last_checkpoint)
             else:
                 init.run()
-                #if init_checkpoint is not None:
-                #     saver.restore(sess, init_checkpoint)	
+                if init_checkpoint is not None:
+                     saver.restore(sess, init_checkpoint)	
 
             coord = tf.train.Coordinator()
             threads = tf.train.start_queue_runners(sess=sess, coord=coord)
@@ -432,7 +449,7 @@ def main(argv=None):
                 # save model
                 if step % params['per_saved_model_step'] == 0:
                     checkpoint_path = os.path.join(params['modelpath'], training_name, 'model')
-                    saver.save(sess, checkpoint_path, global_step=step)
+                    saver_all_variables.save(sess, checkpoint_path, global_step=step)
             coord.request_stop()
             coord.join(threads)
 

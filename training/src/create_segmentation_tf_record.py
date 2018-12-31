@@ -38,8 +38,8 @@ image_path_train = "/data3_share_gpu1/coco/train2017/"
 image_path_val = "/data3_share_gpu1/coco/val2017/"
 output_path = "/raid/tangc/coco_keypoints/"
 num_kp = 17
-crop_padding_x = 1.2
-crop_padding_y = 1.2
+crop_padding_x = 1.5
+crop_padding_y = 1.5
 
 model_input_width = 192
 model_input_height = 192
@@ -252,6 +252,29 @@ def create_mask_record(json_path, image_path, output_path):
 				print('instance size too small!')
 				continue
 
+			#filt the legs
+			if instance.get('num_keypoints', 0) == 0:
+				continue
+
+			kp = np.array(instance['keypoints'])
+			xs = kp[0::3]
+			ys = kp[1::3]
+			vs = kp[2::3]
+
+
+			num_visible_points = 0
+			for idx in range(0, len(vs)):
+				if vs[idx] > 0:
+					num_visible_points = num_visible_points + 1
+
+			if num_visible_points < 5:
+				continue
+
+			if instance['iscrowd'] == 1:
+				continue
+
+
+
 			person_binary_mask = coco.annToMask(instance)
 		
 			t = coco.imgs[instance['image_id']]
@@ -366,6 +389,7 @@ def create_kp_record(_):
 			ys = kp[1::3]
 			vs = kp[2::3]
 
+			
 			x, y, w, h = get_bounding_box(xs, ys, vs)
 
 			bbox = ann['bbox']

@@ -19,7 +19,7 @@ g_mean = 113.75
 b_mean = 106.56
 scale = 0.176
 num_kpoints = 17
-threshold = 0.7
+threshold = 0.5
 colors = np.array
 colors = [
 	[255, 0, 0],
@@ -211,12 +211,13 @@ if __name__ == '__main__':
     # saved_model_graph()
     #metric_prefix(256, 256)
     run_with_frozen_pb(
-         "/data3/tangc/ai_challenger/train/beb4db2939c175401da038eb64e7e39c51bbac7e.jpg",
-         #"/data3/tangc/keypoint_test/p4.png",
-         #"/data3/tangc/ai_challenger/train/77c091e7fc4b3b2c307599ff5b83eb33f36587f8.jpg",
-         192,
+         #"/data3/tangc/ai_challenger/train/beb4db2939c175401da038eb64e7e39c51bbac7e.jpg",
+         #"/data3/tangc/keypoint_test/p6.png",
+         "/data3/tangc/ai_challenger/train/b6961f5de06d0808969031483f24ae5fc08ed602.jpg",
+         112,
          "./frozen_pb/frozen_model.pb",
-         "conv2d/BiasAdd"
+         "sigmoid_output"
+         #"output/BiasAdd"
     )
     #display_image()
 
