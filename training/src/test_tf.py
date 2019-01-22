@@ -28,5 +28,5 @@ norm = tf.reshape(norm, [2, 3, 4])
 concated = tf.concat(norm, 1)
 with tf.Session() as sess:
 	#print (sess.run(heatmap))
-	print(sess.run(norm))
+	#print(sess.run(norm))
 	print(sess.run(concated))
